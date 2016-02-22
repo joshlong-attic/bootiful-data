@@ -3,6 +3,7 @@ package partitioning;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.amqp.core.AmqpTemplate;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobExecutionListener;
@@ -157,6 +158,11 @@ class PartitionedJobConfiguration {
 	@Value("${partition.grid-size:4} ")
 	private int gridSize = 4;
 
+	@Value("${partition.broker.requests:partition-requests}")
+	private String brokerRequests;
+
+	@Value("${partition.broker.replies:partition-replies}")
+	private String brokerReplies;
 
 /*	@Autowired
 	JobBuilderFactory jobBuilderFactory;
@@ -221,15 +227,25 @@ class PartitionedJobConfiguration {
 					output-channel="aggregatedReplyChannel"
 					send-timeout="3600000"/>*/
 
+	@Bean
+	IntegrationFlow masterRepliesFlow(ConnectionFactory cf, PartitionHandler ph) {
+		return IntegrationFlows.from(Amqp.inboundAdapter(cf, this.brokerReplies))
+				.channel(masterReplies())
+				.aggregate( aggregatorSpec -> aggregatorSpec.processor(ph).sendTimeout( 60 * 1000 * 60))
+				.channel(masterAggregateReplies())
+				.get();
+	}
 
 	@Bean
 	IntegrationFlow masterRequestsFlow(AmqpTemplate template) {
 		return IntegrationFlows.from(masterRequests())
-				.handle(Amqp.outboundAdapter(template).routingKey(MASTER_REQUESTS))
+				.handle(Amqp.outboundAdapter(template)
+						.exchangeName(this.brokerRequests)
+						.routingKey(this.brokerRequests))
 				.get();
 	}
 
-	// this all worked 
+	// this all worked
 
 	@Bean(name = MASTER_REQUESTS)
 	QueueChannel masterRequests() {
@@ -256,7 +272,7 @@ class PartitionedJobConfiguration {
 	@Bean
 	PartitionHandler partitionHandler(MessagingTemplate messagingTemplate,
 	                                  JobExplorer jobExplorer,
-	                                  @Qualifier(MASTER_REPLIES) QueueChannel replies) throws Exception {
+	                                  @Qualifier(MASTER_AGGREGATE_REPLIES) QueueChannel replies) throws Exception {
 		MessageChannelPartitionHandler partitionHandler = new MessageChannelPartitionHandler();
 		partitionHandler.setStepName(WORKER_STEP);
 		partitionHandler.setGridSize(this.gridSize);
