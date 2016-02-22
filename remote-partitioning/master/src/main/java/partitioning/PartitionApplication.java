@@ -2,8 +2,6 @@ package partitioning;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.springframework.amqp.core.AmqpTemplate;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobExecutionListener;
@@ -29,20 +27,20 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.batch.BatchDatabaseInitializer;
+import org.springframework.cloud.stream.annotation.EnableBinding;
+import org.springframework.cloud.stream.annotation.Input;
+import org.springframework.cloud.stream.annotation.Output;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
-import org.springframework.integration.annotation.IntegrationComponentScan;
+import org.springframework.integration.annotation.*;
+import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.channel.QueueChannel;
 import org.springframework.integration.core.MessagingTemplate;
-import org.springframework.integration.dsl.IntegrationFlow;
-import org.springframework.integration.dsl.IntegrationFlows;
-import org.springframework.integration.dsl.amqp.Amqp;
 import org.springframework.integration.dsl.channel.MessageChannels;
 import org.springframework.integration.scheduling.PollerMetadata;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.messaging.MessageChannel;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -54,19 +52,19 @@ import java.util.stream.Collectors;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
-import static partitioning.PartitionApplication.*;
+import static partitioning.PartitionApplication.STEP1;
+import static partitioning.PartitionApplication.WORKER_STEP;
+import static partitioning.PartitionMaster.MASTER_REPLIES;
+import static partitioning.PartitionMaster.MASTER_REPLIES_AGGREGATED;
 
 @EnableBatchProcessing
 @IntegrationComponentScan
 @SpringBootApplication
+@EnableBinding(PartitionMaster.class)
 class PartitionApplication {
 
 	public static final String STEP1 = "step1";
 	public static final String WORKER_STEP = "workerStep";
-
-	public static final String MASTER_REQUESTS = "masterRequests";
-	public static final String MASTER_REPLIES = "masterReplies";
-	public static final String MASTER_AGGREGATE_REPLIES = MASTER_REPLIES + "Aggregated";
 
 	public static void main(String args[]) {
 		SpringApplication.run(PartitionApplication.class, args);
@@ -144,6 +142,42 @@ class ColumnRangePartitioner implements Partitioner {
 	}
 }
 
+@Configuration
+class PartitionMasterChannels {
+
+	@Autowired
+	private PartitionMaster partitionMaster;
+
+	@Bean(name = MASTER_REPLIES_AGGREGATED)
+	QueueChannel masterRequestsAggregated() {
+		return MessageChannels.queue().get();
+	}
+
+	DirectChannel masterRequests() {
+		return partitionMaster.masterRequests();
+	}
+
+	DirectChannel masterReplies() {
+		return partitionMaster.masterReplies();
+	}
+
+}
+
+interface PartitionMaster {
+
+	String MASTER_REPLIES = "masterReplies";
+
+	String MASTER_REQUESTS = "masterRequests";
+
+	String MASTER_REPLIES_AGGREGATED = "masterRepliesAggregated";
+
+	@Output(MASTER_REQUESTS)
+	DirectChannel masterRequests();
+
+	@Input(MASTER_REPLIES)
+	DirectChannel masterReplies();
+
+}
 
 @Configuration
 class PartitionedJobConfiguration {
@@ -153,125 +187,43 @@ class PartitionedJobConfiguration {
 	@Value("${partition.grid-size:4} ")
 	private int gridSize = 4;
 
-	@Value("${partition.broker.requests:partition-requests}")
-	private String brokerRequests;
-
-	@Value("${partition.broker.replies:partition-replies}")
-	private String brokerReplies;
-
-/*	@Autowired
-	JobBuilderFactory jobBuilderFactory;
-
-	@Autowired
-	StepBuilderFactory stepBuilderFactory;
-
-	@Autowired
-	DataSource dataSource;
-
-	@Autowired
-	JobExplorer jobExplorer;
-
-	@Autowired
-	JobRepository jobRepository;
-
-	ApplicationContext applicationContext;*/
-
-	/*@Override
-	public JobLauncher getJobLauncher() {
-
-		SimpleJobLauncher jobLauncher = new SimpleJobLauncher();
-		jobLauncher.setJobRepository(jobRepository);
-		jobLauncher.setTaskExecutor(new SimpleAsyncTaskExecutor());
-		return jobLauncher;
-	}*/
-/*
 
 	@Bean
-	IntegrationFlow requestTap(@Qualifier(MASTER_REQUESTS) QueueChannel requests) {
-		return IntegrationFlows.from(requests)
-				.handle(message -> {
-					System.out.println(message.getPayload());
-					message.getHeaders().entrySet().forEach(e -> System.out.println(e.getKey() + '=' + e.getValue()));
-				}).get();
-	}
-*/
-
-
-	/*
-	<bean id="connectionFactory" class="org.apache.activemq.ActiveMQConnectionFactory"
-		  p:brokerURL="${broker.url}"/>
-
-	<int:channel id="requestsChannel"/>
-
-	<int-jms:outbound-channel-adapter connection-factory="connectionFactory"
-									  channel="requestsChannel"
-									  destination-name="requestsQueue"/>
-
-	<int:channel id="replyChannel"/>
-
-	<int-jms:message-driven-channel-adapter connection-factory="connectionFactory"
-											channel="replyChannel"
-											destination-name="replyQueue"/>
-
-	<int:channel id="aggregatedReplyChannel">
-		<int:queue/>
-	</int:channel>
-
-	<int:aggregator ref="partitionHandler"
-					input-channel="replyChannel"
-					output-channel="aggregatedReplyChannel"
-					send-timeout="3600000"/>*/
-
-	@Bean
-	IntegrationFlow masterRepliesFlow(ConnectionFactory cf, PartitionHandler ph) {
-		return IntegrationFlows.from(Amqp.inboundAdapter(cf, this.brokerReplies))
-				.channel(masterReplies())
-				.aggregate( aggregatorSpec -> aggregatorSpec.processor(ph).sendTimeout( 60 * 1000 * 60))
-				.channel(masterAggregateReplies())
-				.get();
-	}
-
-	@Bean
-	IntegrationFlow masterRequestsFlow(AmqpTemplate template) {
-		return IntegrationFlows.from(masterRequests())
-				.handle(Amqp.outboundAdapter(template)
-						.exchangeName(this.brokerRequests)
-						.routingKey(this.brokerRequests))
-				.get();
-	}
-
-	// this all worked
-
-	@Bean(name = MASTER_REQUESTS)
-	QueueChannel masterRequests() {
-		return MessageChannels.queue().get();
-	}
-
-	@Bean(name = MASTER_REPLIES)
-	QueueChannel masterReplies() {
-		return MessageChannels.queue().get();
-	}
-
-	@Bean(name = MASTER_AGGREGATE_REPLIES)
-	QueueChannel masterAggregateReplies() {
-		return MessageChannels.queue().get();
-	}
-
-	@Bean
-	MessagingTemplate messageTemplate(@Qualifier(MASTER_REQUESTS) MessageChannel requests) {
-		MessagingTemplate messagingTemplate = new MessagingTemplate(requests);
+	MessagingTemplate messageTemplate(PartitionMasterChannels master) {
+		MessagingTemplate messagingTemplate = new MessagingTemplate(master.masterRequests());
 		messagingTemplate.setReceiveTimeout(60 * 1000 * 60);
 		return messagingTemplate;
 	}
 
+	@MessageEndpoint
+	public static class AggregatorMessagingEndpoint {
+
+		private final MessageChannelPartitionHandler partitionHandler;
+
+		@Autowired
+		public AggregatorMessagingEndpoint(MessageChannelPartitionHandler partitionHandler) {
+			this.partitionHandler = partitionHandler;
+		}
+
+		@Aggregator(
+				inputChannel = MASTER_REPLIES,
+				outputChannel = MASTER_REPLIES_AGGREGATED,
+				sendTimeout = "3600000",
+				sendPartialResultsOnExpiry = "true")
+		public List<?> aggregate(@Payloads List<?> messages) {
+			return this.partitionHandler.aggregate(messages);
+		}
+	}
+
+
 	@Bean
-	PartitionHandler partitionHandler(MessagingTemplate messagingTemplate,
-	                                  JobExplorer jobExplorer,
-	                                  @Qualifier(MASTER_AGGREGATE_REPLIES) QueueChannel replies) throws Exception {
+	MessageChannelPartitionHandler partitionHandler(MessagingTemplate messagingTemplate,
+	                                                JobExplorer jobExplorer,
+	                                                PartitionMasterChannels master) throws Exception {
 		MessageChannelPartitionHandler partitionHandler = new MessageChannelPartitionHandler();
 		partitionHandler.setStepName(WORKER_STEP);
 		partitionHandler.setGridSize(this.gridSize);
-		partitionHandler.setReplyChannel(replies);
+		partitionHandler.setReplyChannel(master.masterRequestsAggregated());
 		partitionHandler.setMessagingOperations(messagingTemplate);
 		partitionHandler.setPollInterval(5000L);
 		partitionHandler.setJobExplorer(jobExplorer);
@@ -328,7 +280,6 @@ class PartitionedJobConfiguration {
 	ColumnRangePartitioner partitioner(JdbcOperations template) {
 		return new ColumnRangePartitioner(template, "customer".toUpperCase(), "id".toUpperCase());
 	}
-
 
 	@Bean(name = WORKER_STEP)
 	Step workerStep(StepBuilderFactory stepBuilderFactory) {
