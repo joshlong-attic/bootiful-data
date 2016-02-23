@@ -359,7 +359,6 @@ class PartitionWorkerChannels {
 		DirectChannel workerReplies();
 	}
 
-
 	@Autowired
 	private PartitionWorker channels;
 
