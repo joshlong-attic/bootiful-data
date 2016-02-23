@@ -2,10 +2,6 @@ package partitioning;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.BindingBuilder;
-import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.core.TopicExchange;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.StepExecution;
@@ -51,6 +47,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import partitioning.PartitionWorkerChannels.PartitionWorker;
 
 import javax.sql.DataSource;
 import java.util.*;
@@ -58,9 +55,9 @@ import java.util.stream.Collectors;
 
 import static partitioning.PartitionApplication.STEP_1;
 import static partitioning.PartitionApplication.WORKER_STEP;
-import static partitioning.PartitionMaster.*;
-import static partitioning.PartitionWorker.WORKER_REPLIES;
-import static partitioning.PartitionWorker.WORKER_REQUESTS;
+import static partitioning.PartitionMasterChannels.PartitionMaster.*;
+import static partitioning.PartitionWorkerChannels.PartitionWorker.WORKER_REPLIES;
+import static partitioning.PartitionWorkerChannels.PartitionWorker.WORKER_REQUESTS;
 
 @EnableBatchProcessing
 @IntegrationComponentScan
@@ -117,13 +114,13 @@ class ColumnRangePartitioner implements Partitioner {
 }
 
 @Configuration
-@EnableBinding (PartitionMaster.class)
+@EnableBinding(PartitionMasterChannels.PartitionMaster.class)
 class PartitionMasterChannels {
 
 	@Autowired
 	private PartitionMaster partitionMaster;
 
-	@Bean(name = MASTER_REPLIES_AGGREGATED)
+	@Bean(name = PartitionMaster.MASTER_REPLIES_AGGREGATED)
 	QueueChannel masterRequestsAggregated() {
 		return MessageChannels.queue().get();
 	}
@@ -135,18 +132,19 @@ class PartitionMasterChannels {
 	DirectChannel masterReplies() {
 		return partitionMaster.masterReplies();
 	}
-}
 
-interface PartitionMaster {
-	String MASTER_REPLIES = "masterReplies";
-	String MASTER_REQUESTS = "masterRequests";
-	String MASTER_REPLIES_AGGREGATED = "masterRepliesAggregated";
 
-	@Output(MASTER_REQUESTS)
-	DirectChannel masterRequests();
+	public interface PartitionMaster {
+		String MASTER_REPLIES = "masterReplies";
+		String MASTER_REQUESTS = "masterRequests";
+		String MASTER_REPLIES_AGGREGATED = "masterRepliesAggregated";
 
-	@Input(MASTER_REPLIES)
-	DirectChannel masterReplies();
+		@Output(MASTER_REQUESTS)
+		DirectChannel masterRequests();
+
+		@Input(MASTER_REPLIES)
+		DirectChannel masterReplies();
+	}
 }
 
 @Configuration
@@ -259,9 +257,11 @@ class PartitionedJobConfiguration {
 @Component
 class MyBatchDatabaseInitializer extends BatchDatabaseInitializer {
 
-	private final TransactionTemplate transactionTemplate;
+	@Autowired
+	private TransactionTemplate transactionTemplate;
 
-	private final JdbcTemplate jdbcTemplate;
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
 
 	private final static String TABLES[] =
 			(" BATCH_JOB_EXECUTION | BATCH_JOB_EXECUTION_CONTEXT | BATCH_JOB_EXECUTION_PARAMS |" +
@@ -269,12 +269,6 @@ class MyBatchDatabaseInitializer extends BatchDatabaseInitializer {
 					" BATCH_STEP_EXECUTION_CONTEXT | BATCH_STEP_EXECUTION_SEQ")
 					.trim()
 					.split("\\|");
-
-	@Autowired
-	public MyBatchDatabaseInitializer(TransactionTemplate transactionTemplate, JdbcTemplate jdbcTemplate) {
-		this.transactionTemplate = transactionTemplate;
-		this.jdbcTemplate = jdbcTemplate;
-	}
 
 	@Override
 	protected void initialize() {
@@ -338,7 +332,8 @@ class WorkerConfiguration {
 		@Autowired
 		private StepExecutionRequestHandler handler;
 
-		@ServiceActivator(inputChannel = WORKER_REQUESTS, outputChannel = WORKER_REPLIES)
+		@ServiceActivator(inputChannel = WORKER_REQUESTS,
+				outputChannel = WORKER_REPLIES)
 		public StepExecution handle(StepExecutionRequest request) {
 			return this.handler.handle(request);
 		}
@@ -347,9 +342,24 @@ class WorkerConfiguration {
 
 
 @Configuration
-@EnableBinding (PartitionWorker.class)
+@EnableBinding(PartitionWorker.class)
 @Profile(WorkerConfiguration.WORKER_PROFILE)
 class PartitionWorkerChannels {
+
+
+	public interface PartitionWorker {
+
+		String WORKER_REQUESTS = "workerRequests";
+
+		String WORKER_REPLIES = "workerReplies";
+
+		@Input(WORKER_REQUESTS)
+		DirectChannel workerRequests();
+
+		@Output(WORKER_REPLIES)
+		DirectChannel workerReplies();
+	}
+
 
 	@Autowired
 	private PartitionWorker channels;
@@ -362,20 +372,6 @@ class PartitionWorkerChannels {
 		return channels.workerReplies();
 	}
 }
-
-interface PartitionWorker {
-
-	String WORKER_REQUESTS = "workerRequests";
-
-	String WORKER_REPLIES = "workerReplies";
-
-	@Input(WORKER_REQUESTS)
-	DirectChannel workerRequests();
-
-	@Output(WORKER_REPLIES)
-	DirectChannel workerReplies();
-}
-
 
 class Customer {
 	private final long id;
