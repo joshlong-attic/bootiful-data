@@ -83,8 +83,8 @@ class ColumnRangePartitioner implements Partitioner {
 
 	@Autowired
 	ColumnRangePartitioner(JdbcOperations jdbcTemplate,
-	                       @Value("${partition.table:customer}") String table,
-	                       @Value("${partition.column:id}") String column) {
+	                       @Value("${partition.table:CUSTOMER}") String table,
+	                       @Value("${partition.column:ID}") String column) {
 		this.jdbcTemplate = jdbcTemplate;
 		this.table = table;
 		this.column = column;
@@ -232,11 +232,6 @@ class PartitionedJobConfiguration {
 				.step(step)
 				.partitionHandler(partitionHandler)
 				.build();
-	}
-
-	@Bean
-	ColumnRangePartitioner partitioner(JdbcOperations template) {
-		return new ColumnRangePartitioner(template, "customer".toUpperCase(), "id".toUpperCase());
 	}
 
 	@Bean(name = WORKER_STEP)
