@@ -45,9 +45,7 @@ public class IntegrationConfiguration {
 	}
 
 	@Bean
-	IntegrationFlow etlFlow(MessageSource<File> files,
-							JobLauncher launcher,
-							@Qualifier(BatchConfiguration.JOB_NAME) Job job) {
+	IntegrationFlow etlFlow(MessageSource<File> files, JobLauncher launcher, Job job) {
 
 		return IntegrationFlows
 				.from(files, consumerSpec -> consumerSpec.poller(pollerSpec -> pollerSpec.fixedRate(1000)))
@@ -95,7 +93,7 @@ public class IntegrationConfiguration {
 		Assert.isTrue(out.exists() || out.mkdirs());
 		File dest = new File(out, in.getName());
 		try (BufferedInputStream bin = new BufferedInputStream(new FileInputStream(in));
-			 BufferedOutputStream bout = new BufferedOutputStream(new FileOutputStream(dest))) {
+		     BufferedOutputStream bout = new BufferedOutputStream(new FileOutputStream(dest))) {
 			byte[] buffer = new byte[1024];
 			while (bin.read(buffer) != -1) {
 				bout.write(buffer);

@@ -152,8 +152,6 @@ class PartitionedJobConfiguration {
 
 	private Log log = LogFactory.getLog(getClass());
 
-	@Value("${partition.grid-size:4}")
-	private int gridSize = 4;
 
 	@Bean
 	MessagingTemplate messageTemplate(PartitionMasterChannels master) {
@@ -176,10 +174,12 @@ class PartitionedJobConfiguration {
 	}
 
 	@Bean
-	MessageChannelPartitionHandler partitionHandler(MessagingTemplate messagingTemplate, JobExplorer jobExplorer, PartitionMasterChannels master) throws Exception {
+	MessageChannelPartitionHandler partitionHandler(MessagingTemplate messagingTemplate,
+	                                                JobExplorer jobExplorer, PartitionMasterChannels master,
+	                                                @Value("${partition.grid-size:4}") int gridSize) throws Exception {
 		MessageChannelPartitionHandler partitionHandler = new MessageChannelPartitionHandler();
 		partitionHandler.setStepName(WORKER_STEP);
-		partitionHandler.setGridSize(this.gridSize);
+		partitionHandler.setGridSize(gridSize);
 		partitionHandler.setReplyChannel(master.masterRequestsAggregated());
 		partitionHandler.setMessagingOperations(messagingTemplate);
 		partitionHandler.setPollInterval(5000L);
@@ -345,7 +345,6 @@ class WorkerConfiguration {
 @EnableBinding(PartitionWorker.class)
 @Profile(WorkerConfiguration.WORKER_PROFILE)
 class PartitionWorkerChannels {
-
 
 	public interface PartitionWorker {
 
