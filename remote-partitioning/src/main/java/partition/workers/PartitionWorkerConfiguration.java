@@ -17,9 +17,10 @@ import org.springframework.integration.annotation.ServiceActivator;
 import static partition.workers.PartitionWorkerChannels.PartitionWorker.WORKER_REPLIES;
 import static partition.workers.PartitionWorkerChannels.PartitionWorker.WORKER_REQUESTS;
 
+import static partition.workers.PartitionWorkerConfiguration.*;
 
 @Configuration
-@Profile(PartitionWorkerConfiguration.WORKER_PROFILE)
+@Profile(WORKER_PROFILE)
 class PartitionWorkerConfiguration {
 
 	public static final String WORKER_PROFILE = "worker";
@@ -48,7 +49,6 @@ class PartitionWorkerConfiguration {
 		public StepExecution handle(StepExecutionRequest request) {
 			return this.handler.handle(request);
 		}
-
 	}
 
 }

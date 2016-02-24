@@ -1,12 +1,13 @@
 ---
 applications:
-- name: zipkin-client-a
-  memory: 512M
-  instances: 1
-  host: zipkin-client-a-${random-word}
-  path: target/zipkin-client-a.jar
+- name: partition-worker
+  memory: 1G
+  instances: 10
+  host: partition-worker-${random-word}
+  path: target/partition.jar
   services:
-    - sss
+    - batch-psql
+    - batch-rabbitmq
   env:
-    SPRING_PROFILES_ACTIVE: cloud
     DEBUG: "true"
+    SPRING_PROFILES_ACTIVE: worker,cloud
