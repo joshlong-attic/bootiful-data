@@ -2,9 +2,7 @@ package partitioning;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.*;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
@@ -38,6 +36,8 @@ import org.springframework.cloud.stream.annotation.Output;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.integration.annotation.*;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.channel.QueueChannel;
@@ -49,6 +49,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.support.PeriodicTrigger;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.StopWatch;
 import partitioning.PartitionWorkerChannels.PartitionWorker;
 
 import javax.sql.DataSource;
@@ -65,6 +66,11 @@ import static partitioning.PartitionWorkerChannels.PartitionWorker.WORKER_REQUES
 @IntegrationComponentScan
 @SpringBootApplication
 class PartitionApplication {
+
+	@Bean
+	TaskExecutor taskExecutor (){
+		return new SimpleAsyncTaskExecutor();
+	}
 
 	public static final String STEP_1 = "step1";
 
@@ -154,6 +160,8 @@ class PartitionedJobConfiguration {
 
 	private Log log = LogFactory.getLog(getClass());
 
+	@Value("${partition.chunk-size}")
+	private int chunk;
 
 	@Bean
 	MessagingTemplate messageTemplate(PartitionMasterChannels master) {
@@ -205,7 +213,7 @@ class PartitionedJobConfiguration {
 
 		JdbcPagingItemReader<Customer> reader = new JdbcPagingItemReader<>();
 		reader.setDataSource(dataSource);
-		reader.setFetchSize(1000);
+		reader.setFetchSize(this.chunk);
 		reader.setQueryProvider(queryProvider);
 		reader.setRowMapper((rs, i) -> new Customer(rs.getLong("id"), rs.getString("firstName"), rs.getString("lastName"), rs.getDate("birthdate")));
 		return reader;
@@ -237,7 +245,7 @@ class PartitionedJobConfiguration {
 	@Bean(name = WORKER_STEP)
 	Step workerStep(StepBuilderFactory stepBuilderFactory) {
 		return stepBuilderFactory.get(WORKER_STEP)
-				.<Customer, Customer>chunk(1000)
+				.<Customer, Customer>chunk(this.chunk)
 				.reader(pagingItemReader(null, null, null))
 				.writer(customerItemWriter(null))
 				.build();
@@ -251,8 +259,20 @@ class PartitionedJobConfiguration {
 	}
 }
 
+
+/*
+@Configuration
+@Profile(InitConfiguration.INIT_PROFILE)
+class InitConfiguration {
+
+	public static final String INIT_PROFILE = "init";
+}
+
 @Component
-class MyBatchDatabaseInitializer extends BatchDatabaseInitializer {
+@Profile(InitConfiguration.INIT_PROFILE)
+class MySqlBatchDatabaseInitializer extends BatchDatabaseInitializer {
+
+	private boolean resetBatch = true;
 
 	@Autowired
 	private TransactionTemplate transactionTemplate;
@@ -269,18 +289,61 @@ class MyBatchDatabaseInitializer extends BatchDatabaseInitializer {
 
 	@Override
 	protected void initialize() {
-		this.transactionTemplate.execute(tx -> {
-			List<String> tables =
-					Arrays.asList(TABLES)
-							.stream()
-							.map(String::trim)
-							.filter(x -> !x.equals(""))
-							.collect(Collectors.toList());
-			jdbcTemplate.execute("SET foreign_key_checks = 0;");
-			tables.forEach(t -> jdbcTemplate.execute("drop table " + t + ";"));
-			jdbcTemplate.execute("SET foreign_key_checks = 1;");
-			return null;
-		});
+		if (this.resetBatch) {
+			this.transactionTemplate.execute(tx -> {
+				List<String> tables =
+						Arrays.asList(TABLES)
+								.stream()
+								.map(String::trim)
+								.filter(x -> !x.equals(""))
+								.collect(Collectors.toList());
+				jdbcTemplate.execute("SET foreign_key_checks = 0;");
+				tables.forEach(t -> jdbcTemplate.execute("drop table " + t + ";"));
+				jdbcTemplate.execute("SET foreign_key_checks = 1;");
+				return null;
+			});
+		}
+		super.initialize();
+	}
+}
+
+*/
+
+
+@Component
+class MySqlBatchDatabaseInitializer extends BatchDatabaseInitializer {
+
+	private boolean resetBatch = true;
+
+	@Autowired
+	private TransactionTemplate transactionTemplate;
+
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
+
+	private final static String TABLES[] =
+			(" BATCH_JOB_EXECUTION | BATCH_JOB_EXECUTION_CONTEXT | BATCH_JOB_EXECUTION_PARAMS |" +
+					" BATCH_JOB_EXECUTION_SEQ | BATCH_JOB_INSTANCE | BATCH_JOB_SEQ | BATCH_STEP_EXECUTION |" +
+					" BATCH_STEP_EXECUTION_CONTEXT | BATCH_STEP_EXECUTION_SEQ")
+					.trim()
+					.split("\\|");
+
+	@Override
+	protected void initialize() {
+		if (this.resetBatch) {
+			this.transactionTemplate.execute(tx -> {
+				List<String> tables =
+						Arrays.asList(TABLES)
+								.stream()
+								.map(String::trim)
+								.filter(x -> !x.equals(""))
+								.collect(Collectors.toList());
+				jdbcTemplate.execute("SET foreign_key_checks = 0;");
+				tables.forEach(t -> jdbcTemplate.execute("drop table " + t + ";"));
+				jdbcTemplate.execute("SET foreign_key_checks = 1;");
+				return null;
+			});
+		}
 		super.initialize();
 	}
 }
@@ -294,8 +357,24 @@ class MasterConfiguration {
 
 	@Bean
 	Job job(JobBuilderFactory jobBuilderFactory, @Qualifier(STEP_1) Step step) throws Exception {
+		JobExecutionListener jobExecutionListener = new JobExecutionListener() {
+
+			private volatile StopWatch stopWatch = new StopWatch();
+
+			@Override
+			public void beforeJob(JobExecution jobExecution) {
+				this.stopWatch.start();
+			}
+
+			@Override
+			public void afterJob(JobExecution jobExecution) {
+				this.stopWatch.stop();
+				LogFactory.getLog(getClass()).info("job finished in " + this.stopWatch.prettyPrint());
+			}
+		};
 		return jobBuilderFactory
 				.get("job")
+				.listener(jobExecutionListener)
 				.incrementer(new RunIdIncrementer())
 				.start(step)
 				.build();
