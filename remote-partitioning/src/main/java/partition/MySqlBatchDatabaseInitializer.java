@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 @Component
 class MySqlBatchDatabaseInitializer extends BatchDatabaseInitializer {
 
-	private boolean resetBatch = true;
+	private boolean resetBatch = false;
 
 	@Autowired
 	private TransactionTemplate transactionTemplate;

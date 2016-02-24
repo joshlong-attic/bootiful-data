@@ -126,8 +126,10 @@ public class PartitionConfiguration {
 	                                   @Value("${partition.table:CUSTOMER}") String table,
 	                                   @Value("${partition.column:ID}") String column){
 		return gridSize -> {
-			int min = jdbcTemplate.queryForObject("SELECT MIN(" + column + ") from " + table, Integer.class);
-			int max = jdbcTemplate.queryForObject("SELECT MAX(" + column + ") from " + table, Integer.class);
+			System.out.println("111111");
+			int min = jdbcTemplate.queryForObject("SELECT MIN(ID) from customer", Integer.class);
+			int max = jdbcTemplate.queryForObject("SELECT MAX(ID) from customer", Integer.class);
+			System.out.println("111111.AAAAAAA");
 			int targetSize = (max - min) / gridSize + 1;
 			Map<String, ExecutionContext> result = new HashMap<String, ExecutionContext>();
 			int number = 0;
@@ -145,6 +147,7 @@ public class PartitionConfiguration {
 				end += targetSize;
 				number++;
 			}
+			System.out.println("2222222");
 			return result;
 		};
 	}
