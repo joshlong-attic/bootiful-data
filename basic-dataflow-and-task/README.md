@@ -10,4 +10,7 @@
 - `module register --name time --type source --uri maven://org.springframework.cloud.stream.app:time-source-rabbit:1.0.0.BUILD-SNAPSHOT`
 - then register the `stream101` processor: `module register --type processor --name streamnow --uri maven://com.example:stream101:0.0.1-SNAPSHOT`
 - then create a stream out of them all: ` stream create --name s1 --definition "time | streamnow | log " `
-- then deploy the stream: `stream deploy --name s1 `. You will see logs being emitted in the server console. tail those logs. 
+- then deploy the stream: `stream deploy --name s1 `. You will see logs being emitted in the server console. tail those logs.
+
+## For more
+check out Spring Cloud Task [lead Michael Minella's webinar materials](https://github.com/mminella/spring-cloud-task-webinar)
